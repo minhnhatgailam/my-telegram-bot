@@ -1,23 +1,41 @@
 import os
-# Lấy token từ cấu hình hệ thống thay vì dán trực tiếp
-API_TOKEN = os.getenv('BOT_TOKEN')
+import telebot
+from threading import Thread
+from flask import Flask
 
-# 2. Khởi tạo con bot
-# Thêm dấu ngoặc kép bao quanh mã Token của bạn
-bot = telebot.TeleBot("8546336362:AAG1z6W2mce9StJlKSl3tgLm2ngbkqpODi8")
-# 3. Xử lý lệnh /start
+# --- PHẦN 1: TẠO SERVER GIẢ ĐỂ GIỮ BOT LUÔN SỐNG TRÊN RENDER ---
+app = Flask('')
+
+@app.route('/')
+def home():
+    # Khi Render kiểm tra cổng mạng, nó sẽ thấy chữ này và biết bot vẫn sống
+    return "Bot đang chạy 24/7!"
+
+def run():
+    # Render cấp một cổng (Port) ngẫu nhiên, ta cần lấy nó ra
+    port = int(os.environ.get('PORT', 8080))
+    app.run(host='0.0.0.0', port=port)
+
+def keep_alive():
+    # Chạy server Flask trong một luồng riêng để không làm gián đoạn bot
+    t = Thread(target=run)
+    t.start()
+
+# --- PHẦN 2: CẤU HÌNH BOT TELEGRAM ---
+# Lấy Token từ tab Environment trên Render (không dán trực tiếp mã vào đây)
+API_TOKEN = os.getenv('BOT_TOKEN')
+bot = telebot.TeleBot(API_TOKEN)
+
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
-    # Gửi tin nhắn chào mừng kèm tên người dùng
-    user_name = message.from_user.first_name
-    bot.reply_to(message, f"Chào {user_name}! Mình là bot Python của bạn. Rất vui được gặp bạn!")
+    bot.reply_to(message, "Chào Nhật Minh! Bot đã online 24/7 trên Render rồi nhé!")
 
-# 4. Xử lý khi người dùng gửi văn bản bất kỳ
 @bot.message_handler(func=lambda message: True)
 def echo_all(message):
-    # Bot sẽ "nhại" lại những gì bạn vừa gửi
-    bot.send_message(message.chat.id, f"Bạn vừa nói là: {message.text}")
+    bot.reply_to(message, f"Bot nhận được: {message.text}")
 
-# 5. Giữ cho bot luôn chạy
-print("Bot đang khởi động... Hãy vào Telegram và nhắn tin cho nó!")
-bot.infinity_polling()
+# --- PHẦN 3: KHỞI CHẠY ---
+if __name__ == "__main__":
+    keep_alive() # Kích hoạt server giả
+    print("Bot đang khởi động...")
+    bot.infinity_polling() # Giữ bot luôn lắng nghe tin nhắn
