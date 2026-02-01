@@ -8,7 +8,7 @@ from flask import Flask
 app = Flask('')
 @app.route('/')
 def home():
-    return "Bot quy đổi đang chạy!"
+    return "Bot Quy Đổi đang chạy!"
 
 def run():
     port = int(os.environ.get('PORT', 8080))
@@ -22,59 +22,61 @@ def keep_alive():
 API_TOKEN = os.getenv('BOT_TOKEN')
 bot = telebot.TeleBot(API_TOKEN)
 
-# Giả sử tỉ giá 1 USDT = 25,500 VND (Bạn có thể điều chỉnh số này)
+# Tỉ giá USDT/VND (Bạn có thể sửa số này theo ý muốn)
 VND_PER_USDT = 25500 
 
 def get_binance_price(symbol="BTCUSDT"):
-    """Lấy giá coin từ Binance API"""
+    """Lấy giá từ sàn Binance"""
     try:
         url = f"https://api.binance.com/api/v3/ticker/price?symbol={symbol}"
-        response = requests.get(url)
+        response = requests.get(url, timeout=5)
         data = response.json()
         return float(data['price'])
-    except:
+    except Exception as e:
+        print(f"Lỗi lấy giá Binance: {e}")
         return None
 
-# --- PHẦN 3: XỬ LÝ TIN NHẮN ---
+# --- PHẦN 3: XỬ LÝ QUY ĐỔI ---
 
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
-    welcome_text = (
-        f"Xin chào **{message.from_user.first_name}**!\n\n"
-        "Tôi là bot quy đổi VND sang USDT.\n"
-        "Hãy gửi một số tiền (bot sẽ tự hiểu là **nghìn đồng**).\n\n"
-        "Ví dụ: Gửi `200` để quy đổi 200.000đ"
+    text = (
+        "Xin chào! Tôi là Bot Quy Đổi VND -> USDT.\n\n"
+        "🔹 **Cách dùng**: Nhập chính xác số tiền VND bạn muốn đổi.\n"
+        "🔹 **Ví dụ**: Nhập `200000` để tính cho 200.000đ.\n"
+        f"_(Tỉ giá hiện tại: 1 USDT = {VND_PER_USDT:,}đ)_"
     )
-    bot.reply_to(message, welcome_text, parse_mode='Markdown')
+    bot.reply_to(message, text, parse_mode='Markdown')
 
 @bot.message_handler(func=lambda message: True)
-def convert_money(message):
-    try:
-        # Lấy số tiền người dùng nhập (ví dụ 200)
-        amount_k = float(message.text)
-        vnd_amount = amount_k * 1000 # Đổi ra đồng (200.000)
+def handle_conversion(message):
+    # Kiểm tra xem tin nhắn có phải là số không
+    text_input = message.text.replace(',', '').replace('.', '') # Loại bỏ dấu phẩy/chấm nếu có
+    
+    if text_input.isdigit():
+        vnd_amount = float(text_input)
         
-        # Tính toán quy đổi
+        # 1. Tính toán kết quả quy đổi
         usdt_result = vnd_amount / VND_PER_USDT
         
-        # Lấy thêm giá BTC từ Binance để làm tin nhắn thêm chuyên nghiệp
+        # 2. Lấy thêm giá BTC từ Binance để minh họa dữ liệu sàn
         btc_price = get_binance_price("BTCUSDT")
         
+        # 3. Trả lời kết quả
         response = (
-            f"💰 **Kết quả quy đổi:**\n"
-            f"Số tiền: {vnd_amount:,.0f} VNĐ\n"
-            f"Thành: **{usdt_result:.2f} USDT**\n"
-            f"_(Tỉ giá áp dụng: 1 USDT = {VND_PER_USDT:,}đ)_\n\n"
-            f"📊 **Thông tin Binance:**\n"
-            f"Giá BTC hiện tại: ${btc_price:,.2f}"
+            f"✅ **Kết quả quy đổi:**\n"
+            f"💵 Số tiền: `{vnd_amount:,.0f}` VNĐ\n"
+            f"➡️ Nhận được: **{usdt_result:.2f} USDT**\n\n"
+            f"📊 **Thông tin sàn Binance:**\n"
+            f"Giá BTC hiện tại: `${btc_price:,.2f}`"
         )
-        
         bot.reply_to(message, response, parse_mode='Markdown')
-        
-    except ValueError:
-        bot.reply_to(message, "⚠️ Vui lòng chỉ nhập số (ví dụ: 100, 200, 500).")
+    else:
+        # Nếu không phải là số, bot sẽ báo lỗi thay vì nhại lại
+        bot.reply_to(message, "⚠️ Vui lòng chỉ nhập số tiền (Ví dụ: 200000)")
 
 # --- PHẦN 4: KHỞI CHẠY ---
 if __name__ == "__main__":
     keep_alive()
+    print("Bot đang lắng nghe...")
     bot.infinity_polling()
