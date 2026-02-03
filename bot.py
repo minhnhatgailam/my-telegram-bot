@@ -4,88 +4,126 @@ import requests
 from threading import Thread
 from flask import Flask
 
-# --- 1. GIỮ BOT SỐNG ---
+# --- 1. KHỞI TẠO SERVER GIẢ (GIỮ BOT LUÔN SỐNG TRÊN RENDER) ---
 app = Flask('')
+
 @app.route('/')
-def home(): return "Bot P2P Pro đang chạy!"
+def home():
+    # Khi Cron-job hoặc Render truy cập, bot sẽ báo vẫn đang thức
+    return "Bot P2P Shorthand đang chạy 24/7!"
 
 def run():
-    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))
+    # Render cấp cổng PORT ngẫu nhiên, ta cần lấy nó để mở server
+    port = int(os.environ.get('PORT', 8080))
+    app.run(host='0.0.0.0', port=port)
 
 def keep_alive():
-    Thread(target=run).start()
+    # Chạy Flask trong một luồng (thread) riêng để không làm treo Bot
+    t = Thread(target=run)
+    t.start()
 
-# --- 2. HÀM LẤY GIÁ P2P (LẤY KÊNH THỨ 2) ---
+# --- 2. HÀM LẤY DỮ LIỆU P2P TỪ KÊNH THỨ 2 ---
 def get_p2p_price(trade_type="BUY"):
+    """
+    trade_type="BUY": Lấy giá ở tab 'Mua' (bạn dùng VND để mua USDT)
+    trade_type="SELL": Lấy giá ở tab 'Bán' (bạn dùng USDT để đổi lấy VND)
+    """
     url = "https://p2p.binance.com/bapi/c2c/v2/friendly/c2c/adv/search"
-    headers = {"Content-Type": "application/json", "User-Agent": "Mozilla/5.0"}
-    data = {
-        "asset": "USDT", "fiat": "VND", "merchantCheck": False,
-        "page": 1, "rows": 5, "payTypes": [], "tradeType": trade_type
+    headers = {
+        "Content-Type": "application/json",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
     }
+    # Cấu hình dữ liệu gửi tới Binance
+    data = {
+        "asset": "USDT",
+        "fiat": "VND",
+        "merchantCheck": False,
+        "page": 1,
+        "rows": 5, # Lấy 5 người đầu tiên để lọc ra người thứ 2
+        "payTypes": [],
+        "tradeType": trade_type
+    }
+    
     try:
         response = requests.post(url, json=data, headers=headers, timeout=10)
         if response.status_code == 200:
             res_data = response.json()
             ads = res_data.get('data', [])
-            # Kiểm tra nếu có ít nhất 2 người bán/mua
+            # Lấy dữ liệu của người đứng thứ 2 (vị trí số 1 trong danh sách lập trình)
             if len(ads) >= 2:
-                # ads[1] chính là người đứng thứ 2 trong danh sách
                 return float(ads[1]['adv']['price'])
             elif len(ads) == 1:
-                # Nếu chỉ có duy nhất 1 người thì đành lấy người thứ 1
                 return float(ads[0]['adv']['price'])
     except Exception as e:
-        print(f"Lỗi P2P {trade_type}: {e}")
+        print(f"Lỗi gọi API Binance ({trade_type}): {e}")
     return None
 
-# --- 3. CẤU HÌNH BOT ---
+# --- 3. CẤU HÌNH BOT TELEGRAM ---
+# Token được lấy từ tab Environment trên Render
 API_TOKEN = os.getenv('BOT_TOKEN')
 bot = telebot.TeleBot(API_TOKEN)
 
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
-    bot.reply_to(message, "🏦 **Bot Tỉ Giá P2P Binance**\n\nNhập số tiền VND để tính toán quy đổi theo giá thực tế từ **kênh thứ 2** trên sàn.", parse_mode='Markdown')
+    welcome_text = (
+        f"👋 Chào **{message.from_user.first_name}**!\n\n"
+        "Tôi đã cập nhật cơ chế nhập liệu **Shorthand**:\n"
+        "🔹 Nhập `1` = 1,000 VNĐ (Mua) | 1 USDT (Bán)\n"
+        "🔹 Nhập `200` = 200,000 VNĐ (Mua) | 200 USDT (Bán)\n\n"
+        "⚠️ Giá được lấy từ **thương nhân thứ 2** trên sàn Binance P2P để đảm bảo tính thực tế."
+    )
+    bot.reply_to(message, welcome_text, parse_mode='Markdown')
 
 @bot.message_handler(func=lambda message: True)
 def handle_conversion(message):
+    # Chỉ giữ lại các chữ số trong tin nhắn người dùng
     raw_text = "".join(filter(str.isdigit, message.text))
     
     if raw_text:
         try:
-            vnd_amount = float(raw_text)
+            val = float(raw_text)
             
-            # Lấy giá từ kênh thứ 2
-            buy_price = get_p2p_price("BUY")   # Tỉ giá khi bạn đi mua USDT
-            sell_price = get_p2p_price("SELL") # Tỉ giá khi bạn đi bán USDT
+            # Lấy tỉ giá P2P thực tế
+            buy_rate = get_p2p_price("BUY")
+            sell_rate = get_p2p_price("SELL")
             
-            if not buy_price or not sell_price:
-                bot.reply_to(message, "❌ Không thể kết nối dữ liệu P2P. Thử lại sau.")
+            if not buy_rate or not sell_rate:
+                bot.reply_to(message, "❌ Hiện không lấy được tỉ giá từ Binance, hãy thử lại sau ít giây.")
                 return
 
-            usdt_receive = vnd_amount / buy_price
+            # LOGIC QUY ĐỔI SHORTHAND
+            # 1. Chiều Mua: 1 = 1000đ
+            vnd_pay = val * 1000
+            usdt_receive = vnd_pay / buy_rate
             
-            # Giao diện phản hồi mới (Scannable & Clear)
+            # 2. Chiều Bán: 1 = 1 USDT
+            usdt_sell = val
+            vnd_receive = usdt_sell * sell_rate
+            
             response = (
-                f"📊 **KẾT QUẢ QUY ĐỔI P2P**\n"
+                f"📊 **KẾT QUẢ QUY ĐỔI (KÊNH 2)**\n"
                 f"--- \n"
-                f"💰 **Số tiền bạn nhập:** `{vnd_amount:,.0f} VND`\n\n"
-                f"🔴 **Nếu bạn đi MUA USDT:**\n"
-                f"👉 Tỉ giá (Kênh 2): `{buy_price:,.0f} đ/USDT`\n"
-                f"📥 Bạn sẽ nhận: **{usdt_receive:.2f} USDT**\n\n"
-                f"🟢 **Nếu bạn đi BÁN USDT:**\n"
-                f"👉 Tỉ giá (Kênh 2): `{sell_price:,.0f} đ/USDT`\n"
-                f"📤 Bạn sẽ nhận: **{vnd_amount * sell_price:,.0f} VND**\n"
+                f"🔴 **BẠN ĐI MUA (Pay VND):**\n"
+                f"💰 Bỏ ra: `{vnd_pay:,.0f}đ`\n"
+                f"💵 Tỉ giá: `{buy_rate:,.0f}đ`\n"
+                f"📥 Nhận về: **{usdt_receive:.2f} USDT**\n\n"
+                f"🟢 **BẠN ĐI BÁN (Get VND):**\n"
+                f"💰 Bỏ ra: `{usdt_sell:,.0f} USDT`\n"
+                f"💵 Tỉ giá: `{sell_rate:,.0f}đ`\n"
+                f"📤 Nhận về: **{vnd_receive:,.0f}đ**\n"
                 f"--- \n"
-                f"⚖️ **Chênh lệch sàn:** `{buy_price - sell_price:,.0f} đ`"
+                f"⚖️ Chênh lệch (Spread): `{buy_rate - sell_rate:,.0f}đ`"
             )
             bot.reply_to(message, response, parse_mode='Markdown')
             
         except Exception as e:
-            bot.reply_to(message, "❌ Lỗi tính toán. Vui lòng nhập số hợp lệ.")
+            bot.reply_to(message, "⚠️ Có lỗi xảy ra khi tính toán. Vui lòng thử lại.")
+            print(f"Lỗi xử lý tin nhắn: {e}")
     else:
-        bot.reply_to(message, "⚠️ Vui lòng nhập số tiền (Ví dụ: 5000000)")
+        bot.reply_to(message, "⚠️ Vui lòng nhập một con số (ví dụ: 100, 500, 2000).")
 
+# --- 4. KÍCH HOẠT ---
 if __name__ == "__main__":
-    keep_alive()
-    bot.infinity_polling()
+    keep_alive() # Bật server giả để chống ngủ đông
+    print("Bot đang khởi động...")
+    bot.infinity_polling() # Giữ bot luôn lắng nghe tin nhắn
