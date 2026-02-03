@@ -67,9 +67,8 @@ bot = telebot.TeleBot(API_TOKEN)
 def send_welcome(message):
     welcome_text = (
         f"👋 Chào **{message.from_user.first_name}**!\n\n"
-        "Tôi đã cập nhật cơ chế nhập liệu **Shorthand**:\n"
-        "🔹 Nhập `1` = 1,000 VNĐ (Mua) | 1 USDT (Bán)\n"
-        "🔹 Nhập `200` = 200,000 VNĐ (Mua) | 200 USDT (Bán)\n\n"
+        "🔹 Nhập số ví dụ :  `1` = 1,000 VNĐ (Mua) "
+        "🔹 Nhập số ví dụ :  `1` = 1 USDT (Bán)
         "⚠️ Giá được lấy từ **thương nhân thứ 2** trên sàn Binance P2P để đảm bảo tính thực tế."
     )
     bot.reply_to(message, welcome_text, parse_mode='Markdown')
@@ -127,3 +126,4 @@ if __name__ == "__main__":
     keep_alive() # Bật server giả để chống ngủ đông
     print("Bot đang khởi động...")
     bot.infinity_polling() # Giữ bot luôn lắng nghe tin nhắn
+
